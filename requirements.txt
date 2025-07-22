@@ -1,0 +1,12 @@
+fastapi
+slowapi
+uvicorn[standard]
+gunicorn
+python-dotenv
+git+https://github.com/openai/whisper.git
+pydub
+speechrecognition
+google-generativeai
+locust
+python-multipart
+
