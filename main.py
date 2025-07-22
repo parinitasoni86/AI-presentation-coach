@@ -5,6 +5,7 @@ import whisper
 import speech_recognition as sr
 from pydub import AudioSegment
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import Request
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -12,6 +13,12 @@ import google.generativeai as genai
 
 import logging
 from fastapi.logger import logger
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
 
 # ------------------------------------------------------
 # Load environment variables & logging setup
@@ -24,13 +31,13 @@ logger = logging.getLogger(__name__)
 # Configure Gemini with secure key from .env
 # ------------------------------------------------------
 API_KEY = os.getenv("GOOGLE_API_KEY")
-print("GOOGLE_API_KEY:", "AIzaSyBNLzAJTkakn66hQdUhvpHYJJA3Ei4wezQ")
+print("GOOGLE_API_KEY:", "AIzaSyD_1yMw8C-vA1VrtUMljbBRlEDPyFB_kt4")
 
 if not API_KEY:
     logging.error("GOOGLE_API_KEY not set in .env")
     raise EnvironmentError("Missing GOOGLE_API_KEY")
 
-genai.configure(api_key="AIzaSyBNLzAJTkakn66hQdUhvpHYJJA3Ei4wezQ")
+genai.configure(api_key="AIzaSyD_1yMw8C-vA1VrtUMljbBRlEDPyFB_kt4")
 
 model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
 
@@ -38,6 +45,17 @@ model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
 # FastAPI init
 # ------------------------------------------------------
 app = FastAPI(title="AI Presentation Coach (Production Ready)")
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can replace "*" with specific frontend URLs like "http://localhost:3000"
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ------------------------------------------------------
 # Pydantic models
@@ -80,8 +98,9 @@ def gemini_chat(prompt: str, **kwargs) -> str:
 async def root():
     return {"status": "running", "msg": "Backend ready"}
 
+@limiter.limit("10/minute")  # Limit to 5 requests per minute per IP
 @app.post("/detect_fillers", response_model=FillerOut)
-def detect_fillers(item: ScriptIn):
+def detect_fillers(request: Request, item: ScriptIn):
     logger = logging.getLogger("detect_fillers")
     try:
         words = item.script.split()
@@ -96,8 +115,9 @@ def detect_fillers(item: ScriptIn):
         raise HTTPException(500, detail="Error detecting filler words")
 
 
+@limiter.limit("5/minute")
 @app.post("/generate_pitch", response_model=PitchOut)
-def generate_pitch(item: ScriptIn):
+def generate_pitch(request: Request, item: ScriptIn):
     logger = logging.getLogger("generate_pitch")
     try:
         if item.length_minutes not in (2, 3, 4):
@@ -116,8 +136,9 @@ def generate_pitch(item: ScriptIn):
         raise HTTPException(500, detail="Error generating pitch")
 
 
+@limiter.limit("5/minute")
 @app.post("/script_coach", response_model=FeedbackOut)
-def script_coach(item: ScriptIn):
+def script_coach(request: Request, item: ScriptIn):
     logger = logging.getLogger("script_coach")
     try:
         prompt = ("Provide 5 bullet-point suggestions to improve clarity, structure, "
@@ -137,8 +158,10 @@ def script_coach(item: ScriptIn):
         raise HTTPException(500, detail="Error providing script feedback")
 
 
+
+@limiter.limit("3/minute")
 @app.post("/transcribe_audio", response_model=ScriptIn)
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(request: Request, file: UploadFile = File(...)):
     logger = logging.getLogger("transcribe_audio")
     
     # Validate file type
