@@ -9,4 +9,5 @@ speechrecognition
 google-generativeai
 locust
 python-multipart
-
+aiofiles
+loguru

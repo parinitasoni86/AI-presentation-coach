@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y git
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install Python dependencies
-RUN pip install -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port
 EXPOSE 8000
